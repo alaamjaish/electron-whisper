@@ -30,6 +30,20 @@ let sonioxClient: SonioxClient | null = null
 let audioSampleRate = 48000
 let recordingSessionId = 0 // Track sessions to ignore stale audio
 let sonioxConnecting = false // Guard against double mic-ready
+const RECORDING_POPUP_WIDTH = 130
+const RECORDING_POPUP_HEIGHT = 34
+
+function centerWindowOnActiveDisplay(width: number, height: number): void {
+  const cursorPoint = screen.getCursorScreenPoint()
+  const { workArea } = screen.getDisplayNearestPoint(cursorPoint)
+
+  mainWindow?.setBounds({
+    width,
+    height,
+    x: Math.round(workArea.x + workArea.width / 2 - width / 2),
+    y: Math.round(workArea.y + workArea.height / 2 - height / 2)
+  })
+}
 
 function createWindow(): void {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
@@ -181,11 +195,9 @@ function startRecording(): void {
   // Save which app has focus BEFORE showing our popup
   saveFocusedWindow()
 
-  const { width: sw } = screen.getPrimaryDisplay().workAreaSize
-  mainWindow?.setSize(130, 34)
-  mainWindow?.setPosition(Math.round(sw / 2 - 65), 10)
-  mainWindow?.showInactive()
+  centerWindowOnActiveDisplay(RECORDING_POPUP_WIDTH, RECORDING_POPUP_HEIGHT)
   mainWindow?.webContents.send('navigate', 'recording')
+  mainWindow?.showInactive()
 }
 
 async function connectSoniox(): Promise<void> {
@@ -350,6 +362,6 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
 })
 
-app.on('window-all-closed', (e: Event) => {
-  e.preventDefault()
+app.on('window-all-closed', () => {
+  // Keep the tray app alive when all windows are closed.
 })
