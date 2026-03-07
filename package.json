@@ -1,0 +1,38 @@
+{
+  "name": "localwispr",
+  "version": "1.0.0",
+  "description": "A Windows desktop voice-to-text companion",
+  "main": "./out/main/index.js",
+  "author": "LocalWispr",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
+    "build:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "koffi": "^2.15.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^22.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.0",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
+  }
+}
