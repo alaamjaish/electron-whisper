@@ -1,5 +1,5 @@
-appId: com.localwispr.app
-productName: LocalWispr
+appId: com.localtranscriber.app
+productName: LocalTranscriber
 directories:
   buildResources: build
 files:
@@ -12,10 +12,10 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: LocalWispr
+  executableName: LocalTranscriber
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: LocalWispr
-  uninstallDisplayName: LocalWispr
+  shortcutName: LocalTranscriber
+  uninstallDisplayName: LocalTranscriber
   createDesktopShortcut: always
 npmRebuild: true

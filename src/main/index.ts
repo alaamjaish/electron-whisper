@@ -149,7 +149,7 @@ function createTray(): void {
     { label: 'Quit', click: (): void => app.quit() }
   ])
 
-  tray.setToolTip('LocalWispr')
+  tray.setToolTip('LocalTranscriber')
   tray.setContextMenu(contextMenu)
 }
 

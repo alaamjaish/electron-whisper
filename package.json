@@ -1,5 +1,5 @@
 {
-  "name": "localwispr",
+  "name": "localtranscriber",
   "version": "1.0.0",
   "description": "A Windows desktop voice-to-text companion",
   "main": "./out/main/index.js",
