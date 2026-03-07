@@ -4,9 +4,12 @@ export interface ElectronAPI {
   getHistory: () => Promise<Array<{ id: string; text: string; timestamp: number }>>
   deleteHistoryEntry: (id: string) => Promise<void>
   copyToClipboard: (text: string) => Promise<void>
+  pasteAtCursor: (text: string) => Promise<void>
   startRecording: () => Promise<void>
   stopRecording: () => Promise<void>
   sendAudioChunk: (chunk: ArrayBuffer) => void
+  sendSampleRate: (rate: number) => void
+  sendMicReady: () => void
   onTranscriptToken: (callback: (token: string, isFinal: boolean) => void) => void
   onRecordingStateChange: (callback: (state: string) => void) => void
   onNavigate: (callback: (view: string) => void) => void

@@ -4,3 +4,4 @@ dist/
 *.env
 settings.json
 history.json
+*.tsbuildinfo

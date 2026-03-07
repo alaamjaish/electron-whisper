@@ -9,7 +9,6 @@ interface HistoryEntry {
 export default function HistoryPanel(): React.JSX.Element {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [pastedId, setPastedId] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.getHistory().then(setEntries)
@@ -22,9 +21,7 @@ export default function HistoryPanel(): React.JSX.Element {
   }
 
   const handlePaste = async (entry: HistoryEntry): Promise<void> => {
-    setPastedId(entry.id)
     await window.api.pasteAtCursor(entry.text)
-    setTimeout(() => setPastedId(null), 1500)
   }
 
   const handleDelete = async (id: string): Promise<void> => {
