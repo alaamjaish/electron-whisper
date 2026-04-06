@@ -1,4 +1,4 @@
-      1 +# Product Requirements Document                                                                                                       
+      1 +# Product Requirements Document                                                                   w                                    
       2 +                                                                                                                                      
       3 +## Document Intent                                                                                                                    
       4 +This document defines the product at a high level so it can be rebuilt from first principles with a cleaner direction. It stays focuse
