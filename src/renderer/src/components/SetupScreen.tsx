@@ -13,9 +13,10 @@ export default function SetupScreen(): React.JSX.Element {
 
   return (
     <div className="w-full h-full bg-gray-950 text-white p-6 flex flex-col rounded-2xl border border-gray-800">
-      <h1 className="text-lg font-semibold mb-1">Welcome to LocalWispr</h1>
+      <h1 className="text-lg font-semibold mb-1">Welcome to LocalTranscriber</h1>
       <p className="text-sm text-gray-400 mb-6">
-        Enter your Soniox API key to get started.
+        Enter your Soniox API key to get started. Get one at{' '}
+        <span className="text-blue-400">console.soniox.com</span>.
       </p>
 
       <label className="text-sm text-gray-300 mb-2">API Key</label>

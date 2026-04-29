@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**LocalWispr** — A Windows-only desktop voice-to-text app that lives in the system tray. Press Alt+Shift+L to record speech, which streams through Soniox's real-time STT API and types the transcription directly at the user's cursor in any application. No clipboard is used during dictation — text is injected via Windows SendInput API.
+**LocalTranscriber** — A Windows-only desktop voice-to-text app that lives in the system tray. Press Alt+Shift+L to record speech, which streams through Soniox's real-time STT API and types the transcription directly at the user's cursor in any application. No clipboard is used during dictation — text is injected via Windows SendInput API.
 
 ## Commands
 

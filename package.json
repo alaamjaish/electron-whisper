@@ -1,9 +1,28 @@
 {
   "name": "localtranscriber",
   "version": "1.0.0",
-  "description": "A Windows desktop voice-to-text companion",
+  "description": "A Windows desktop voice-to-text companion. Press a shortcut, speak, and the text streams in at your cursor — works in any app.",
   "main": "./out/main/index.js",
-  "author": "LocalWispr",
+  "author": "Alaa M. Jaish",
+  "license": "MIT",
+  "homepage": "https://github.com/alaamjaish/electron-whisper#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alaamjaish/electron-whisper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alaamjaish/electron-whisper/issues"
+  },
+  "keywords": [
+    "voice-to-text",
+    "speech-to-text",
+    "dictation",
+    "transcription",
+    "soniox",
+    "electron",
+    "windows",
+    "stt"
+  ],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -14,7 +33,6 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "@nut-tree-fork/nut-js": "^4.2.6",
     "koffi": "^2.15.1",
     "ws": "^8.18.0"
   },
