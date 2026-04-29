@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
+import { log } from './logger'
 
 const userDataPath = app.getPath('userData')
 
@@ -30,15 +31,20 @@ function writeJSON<T>(filename: string, data: T): void {
 }
 
 export function getSettings(): Settings {
-  return readJSON<Settings>('settings.json', { apiKey: '' })
+  const settings = readJSON<Settings>('settings.json', { apiKey: '' })
+  log('STORE', `getSettings -> apiKey=${settings.apiKey ? settings.apiKey.substring(0, 8) + '...' : '(empty)'}`)
+  return settings
 }
 
 export function saveSettings(settings: Settings): void {
+  log('STORE', `saveSettings -> apiKey=${settings.apiKey?.substring(0, 8)}...`)
   writeJSON('settings.json', settings)
 }
 
 export function getHistory(): HistoryEntry[] {
-  return readJSON<HistoryEntry[]>('history.json', [])
+  const history = readJSON<HistoryEntry[]>('history.json', [])
+  log('STORE', `getHistory -> ${history.length} entries`)
+  return history
 }
 
 export function addHistoryEntry(text: string): void {
@@ -50,9 +56,11 @@ export function addHistoryEntry(text: string): void {
   })
   if (history.length > 100) history.length = 100
   writeJSON('history.json', history)
+  log('STORE', `addHistoryEntry -> "${text.substring(0, 60)}..." (now ${history.length} entries)`)
 }
 
 export function deleteHistoryEntry(id: string): void {
   const history = getHistory().filter((e) => e.id !== id)
   writeJSON('history.json', history)
+  log('STORE', `deleteHistoryEntry id=${id} -> ${history.length} entries remaining`)
 }

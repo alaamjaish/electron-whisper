@@ -1,6 +1,4 @@
-// Direct Unicode typing via Windows SendInput API — no clipboard
-// Append-only with small correction margin (max 3 char backspace)
-// Focus management to prevent popup drag from stealing cursor
+import { log } from './logger'
 
 let sendInputFn: ((count: number, buf: Buffer, size: number) => number) | null = null
 let getForegroundWindowFn: (() => unknown) | null = null
@@ -11,8 +9,8 @@ const INPUT_KEYBOARD = 1
 const KEYEVENTF_UNICODE = 0x0004
 const KEYEVENTF_KEYUP = 0x0002
 const VK_BACK = 0x08
-const INPUT_SIZE = 40 // sizeof(INPUT) on x64 Windows
-const MAX_BACKSPACE = 3 // never delete more than this many chars
+const INPUT_SIZE = 40
+const MAX_BACKSPACE = 3
 
 function init(): boolean {
   if (loaded) return sendInputFn !== null
@@ -24,10 +22,10 @@ function init(): boolean {
     sendInputFn = user32.func('uint SendInput(uint nInputs, void *pInputs, int cbSize)')
     getForegroundWindowFn = user32.func('void *GetForegroundWindow()')
     setForegroundWindowFn = user32.func('int SetForegroundWindow(void *hWnd)')
-    console.log('[TYPING] Loaded: SendInput + focus management')
+    log('TYPING', 'koffi loaded OK - SendInput + focus management')
     return true
   } catch (err) {
-    console.error('[TYPING] Failed to load koffi:', err)
+    log('TYPING', `FAILED to load koffi: ${err}`)
     return false
   }
 }
@@ -59,24 +57,37 @@ function sendChars(text: string): void {
     writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
     offset += INPUT_SIZE
   }
-  sendInputFn(totalEvents, buffer, INPUT_SIZE)
+  const sent = sendInputFn(totalEvents, buffer, INPUT_SIZE)
+  if (sent !== totalEvents) {
+    log('TYPING', `SendInput only sent ${sent}/${totalEvents} events`)
+  }
 }
-
-// ── Focus management ──
 
 let savedHwnd: unknown = null
 
 export function saveFocusedWindow(): void {
   if (!init() || !getForegroundWindowFn) return
-  savedHwnd = getForegroundWindowFn()
+  try {
+    savedHwnd = getForegroundWindowFn()
+    log('TYPING', `Saved focused window handle (${savedHwnd ? typeof savedHwnd : 'empty'})`)
+  } catch (err) {
+    savedHwnd = null
+    log('TYPING', `Failed to save focused window handle: ${err}`)
+  }
 }
 
 export function restoreFocusedWindow(): void {
   if (!savedHwnd || !setForegroundWindowFn) return
-  setForegroundWindowFn(savedHwnd)
+  try {
+    log('TYPING', 'Restoring focus to saved window')
+    const ok = setForegroundWindowFn(savedHwnd)
+    if (!ok) {
+      log('TYPING', 'SetForegroundWindow returned false')
+    }
+  } catch (err) {
+    log('TYPING', `Failed to restore focus: ${err}`)
+  }
 }
-
-// ── Streaming typing (recording) ──
 
 let screenText = ''
 
@@ -88,10 +99,15 @@ export function streamType(fullText: string): void {
   const charsToDelete = screenText.length - shared
 
   if (charsToDelete <= MAX_BACKSPACE) {
-    // Small correction or pure append — allow it
     const newChars = fullText.substring(shared)
     const totalEvents = (charsToDelete + newChars.length) * 2
     if (totalEvents === 0) return
+
+    if (charsToDelete > 0) {
+      log('TYPING', `Backspace ${charsToDelete} + type "${newChars}" (screen: ${screenText.length}->${fullText.length} chars)`)
+    } else {
+      log('TYPING', `Append: "${newChars}" (screen: ${screenText.length}->${fullText.length} chars)`)
+    }
 
     const buffer = Buffer.alloc(totalEvents * INPUT_SIZE, 0)
     let offset = 0
@@ -108,20 +124,23 @@ export function streamType(fullText: string): void {
       writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
       offset += INPUT_SIZE
     }
-    sendInputFn(totalEvents, buffer, INPUT_SIZE)
+
+    const sent = sendInputFn(totalEvents, buffer, INPUT_SIZE)
+    if (sent !== totalEvents) {
+      log('TYPING', `SendInput only sent ${sent}/${totalEvents} events`)
+    }
     screenText = fullText
   } else if (fullText.length > screenText.length) {
-    // Large revision but text grew — only append the new tail, never delete
     const newChars = fullText.substring(screenText.length)
     if (newChars.length > 0) {
+      log('TYPING', `Large revision (would delete ${charsToDelete}) - append-only: "${newChars}"`)
       sendChars(newChars)
       screenText = screenText + newChars
     }
+  } else {
+    log('TYPING', `Large revision + text shrank (delete ${charsToDelete}, new ${fullText.length - shared}) - skipped`)
   }
-  // If text shrank with large revision: do nothing, keep what's on screen
 }
-
-// ── One-shot paste (history) — clipboard + Ctrl+V for instant paste ──
 
 const VK_CONTROL = 0x11
 const VK_V = 0x56
@@ -129,15 +148,19 @@ const VK_V = 0x56
 export function pasteText(text: string): void {
   if (!init() || !sendInputFn || text.length === 0) return
 
-  // Set clipboard externally (caller sets it), then Ctrl+V = 4 events
+  log('TYPING', `Paste via Ctrl+V (${text.length} chars)`)
   const buffer = Buffer.alloc(4 * INPUT_SIZE, 0)
   writeKey(buffer, 0, VK_CONTROL, 0, 0)
   writeKey(buffer, INPUT_SIZE, VK_V, 0, 0)
   writeKey(buffer, INPUT_SIZE * 2, VK_V, 0, KEYEVENTF_KEYUP)
   writeKey(buffer, INPUT_SIZE * 3, VK_CONTROL, 0, KEYEVENTF_KEYUP)
-  sendInputFn(4, buffer, INPUT_SIZE)
+  const sent = sendInputFn(4, buffer, INPUT_SIZE)
+  if (sent !== 4) {
+    log('TYPING', `SendInput only sent ${sent}/4 paste events`)
+  }
 }
 
 export function resetTyping(): void {
+  log('TYPING', `Reset (was ${screenText.length} chars on screen)`)
   screenText = ''
 }

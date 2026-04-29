@@ -13,6 +13,7 @@ function App(): React.JSX.Element {
     window.api.onNavigate((newView) => {
       setView(newView as View)
     })
+    window.api.sendRendererReady()
     return (): void => {
       window.api.removeAllListeners('navigate')
     }

@@ -1,5 +1,48 @@
 import { useState, useEffect, useRef } from 'react'
 
+function errorToMessage(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`
+  return String(err)
+}
+
+function isVirtualOrSilentProne(label: string): boolean {
+  const lower = label.toLowerCase()
+  return (
+    lower.includes('default -') ||
+    lower.includes('communications -') ||
+    lower.includes('ai noise') ||
+    lower.includes('noise-cancelling') ||
+    lower.includes('noise cancelling') ||
+    lower.includes('asus utility') ||
+    lower.includes('virtual') ||
+    lower.includes('nvidia') ||
+    lower.includes('broadcast') ||
+    lower.includes('stereo mix') ||
+    lower.includes('obs')
+  )
+}
+
+function scoreInputDevice(device: MediaDeviceInfo): number {
+  const label = device.label.toLowerCase()
+  let score = 0
+
+  if (isVirtualOrSilentProne(device.label)) score -= 100
+  if (label.includes('microphone')) score += 25
+  if (label.includes('array')) score += 20
+  if (label.includes('realtek')) score += 18
+  if (label.includes('logi') || label.includes('webcam')) score += 12
+  if (device.deviceId && device.deviceId !== 'default' && device.deviceId !== 'communications') score += 5
+
+  return score
+}
+
+function pickInputDevice(devices: MediaDeviceInfo[]): MediaDeviceInfo | null {
+  const inputs = devices.filter((device) => device.kind === 'audioinput')
+  if (inputs.length === 0) return null
+
+  return [...inputs].sort((a, b) => scoreInputDevice(b) - scoreInputDevice(a))[0]
+}
+
 export default function RecordingPopup(): React.JSX.Element {
   const [audioLevel, setAudioLevel] = useState(0)
   const [isRecording, setIsRecording] = useState(false)
@@ -9,6 +52,9 @@ export default function RecordingPopup(): React.JSX.Element {
   const animFrameRef = useRef<number>(0)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const mountedRef = useRef(true)
+  const cleaningUpRef = useRef(false)
+  const sentAudioStartedRef = useRef(false)
+  const reportedErrorRef = useRef(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const smoothBarsRef = useRef<number[]>(new Array(5).fill(0.08))
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -33,21 +79,120 @@ export default function RecordingPopup(): React.JSX.Element {
 
   useEffect(() => {
     mountedRef.current = true
+    cleaningUpRef.current = false
+    sentAudioStartedRef.current = false
+    reportedErrorRef.current = false
+
+    const reportMicError = (message: string): void => {
+      if (reportedErrorRef.current) return
+      reportedErrorRef.current = true
+      console.error('[RENDERER] Mic error:', message)
+      window.api.sendMicError(message)
+    }
+
+    const cleanup = (): void => {
+      cleaningUpRef.current = true
+
+      if (processorRef.current) {
+        processorRef.current.disconnect()
+        processorRef.current.onaudioprocess = null
+        processorRef.current = null
+      }
+
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch((err) => {
+          console.error('[RENDERER] Failed to close AudioContext:', err)
+        })
+      }
+
+      cancelAnimationFrame(animFrameRef.current)
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+
+      streamRef.current = null
+      audioContextRef.current = null
+      setIsRecording(false)
+      setAudioLevel(0)
+      setElapsed(0)
+    }
 
     const startCapture = async (): Promise<void> => {
       try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('getUserMedia is not available')
+        }
+
+        const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const inputDevices = devices.filter((device) => device.kind === 'audioinput')
+        window.api.sendMicDevices(
+          inputDevices.map((device) => `${device.label || '(unlabeled audio input)'} [${device.deviceId}]`)
+        )
+
+        const selectedDevice = pickInputDevice(devices)
+        window.api.sendMicDevice(
+          selectedDevice
+            ? `${selectedDevice.label || '(unlabeled audio input)'} [${selectedDevice.deviceId}]`
+            : '(browser default)'
+        )
+
+        permissionStream.getTracks().forEach((track) => track.stop())
+
+        const audioConstraint: MediaTrackConstraints = {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+
+        if (
+          selectedDevice?.deviceId &&
+          selectedDevice.deviceId !== 'default' &&
+          selectedDevice.deviceId !== 'communications'
+        ) {
+          audioConstraint.deviceId = { exact: selectedDevice.deviceId }
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+          audio: audioConstraint
         })
 
         if (!mountedRef.current) {
-          stream.getTracks().forEach((t) => t.stop())
+          stream.getTracks().forEach((track) => track.stop())
           return
         }
+
+        stream.getAudioTracks().forEach((track) => {
+          track.addEventListener('ended', () => {
+            if (mountedRef.current && !cleaningUpRef.current) {
+              reportMicError('Microphone track ended unexpectedly')
+            }
+          })
+        })
 
         streamRef.current = stream
         const audioContext = new AudioContext()
         audioContextRef.current = audioContext
+
+        audioContext.onstatechange = (): void => {
+          if (!mountedRef.current || cleaningUpRef.current) return
+          if (audioContext.state === 'suspended') {
+            audioContext.resume().catch((err) => {
+              reportMicError(`AudioContext resume failed after suspend: ${errorToMessage(err)}`)
+            })
+          }
+          if (audioContext.state === 'closed') {
+            reportMicError('AudioContext closed unexpectedly')
+          }
+        }
+
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume()
+        }
+
         const actualSampleRate = audioContext.sampleRate
         window.api.sendSampleRate(actualSampleRate)
 
@@ -64,7 +209,19 @@ export default function RecordingPopup(): React.JSX.Element {
         processor.connect(audioContext.destination)
 
         processor.onaudioprocess = (event): void => {
-          if (!mountedRef.current) return
+          if (!mountedRef.current || cleaningUpRef.current) return
+          if (audioContext.state !== 'running') {
+            audioContext.resume().catch((err) => {
+              reportMicError(`AudioContext resume failed while processing: ${errorToMessage(err)}`)
+            })
+            return
+          }
+
+          if (!sentAudioStartedRef.current) {
+            sentAudioStartedRef.current = true
+            window.api.sendAudioStarted()
+          }
+
           const float32Data = event.inputBuffer.getChannelData(0)
           const int16Data = new Int16Array(float32Data.length)
           for (let i = 0; i < float32Data.length; i++) {
@@ -79,13 +236,12 @@ export default function RecordingPopup(): React.JSX.Element {
         const smoothBars = smoothBarsRef.current
 
         const updateLevel = (): void => {
-          if (!mountedRef.current) return
+          if (!mountedRef.current || cleaningUpRef.current) return
           analyser.getByteFrequencyData(dataArray)
 
           const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length
           setAudioLevel(avg / 255)
 
-          // Sample 5 frequency bands from voice range
           const binCount = dataArray.length
           const voiceBins = Math.floor(binCount * 0.4)
           const binsPerBar = Math.max(1, Math.floor(voiceBins / barCount))
@@ -132,33 +288,16 @@ export default function RecordingPopup(): React.JSX.Element {
         setIsRecording(true)
         window.api.sendMicReady()
       } catch (err) {
-        console.error('[RENDERER] Mic error:', err)
+        reportMicError(errorToMessage(err))
+        cleanup()
       }
     }
 
     startCapture()
 
     window.api.onRecordingStateChange((state) => {
-      if (state === 'stopped') cleanup()
+      if (state === 'stopped' || state === 'error') cleanup()
     })
-
-    const cleanup = (): void => {
-      if (processorRef.current) {
-        processorRef.current.disconnect()
-        processorRef.current = null
-      }
-      streamRef.current?.getTracks().forEach((t) => t.stop())
-      audioContextRef.current?.close()
-      cancelAnimationFrame(animFrameRef.current)
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-      streamRef.current = null
-      audioContextRef.current = null
-      setIsRecording(false)
-      setAudioLevel(0)
-    }
 
     return (): void => {
       mountedRef.current = false
@@ -173,7 +312,6 @@ export default function RecordingPopup(): React.JSX.Element {
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       <div className="w-full h-full rounded-[12px] bg-[#1a1a1a]/90 border border-white/[0.08] backdrop-blur-2xl flex items-center px-2.5 gap-2">
-        {/* Dot */}
         <div className="relative flex items-center justify-center shrink-0" style={{ width: 10, height: 10 }}>
           {isRecording && (
             <div
@@ -198,7 +336,6 @@ export default function RecordingPopup(): React.JSX.Element {
           />
         </div>
 
-        {/* Waveform — 5 bars, 2x canvas */}
         <canvas
           ref={canvasRef}
           width={90}
@@ -207,7 +344,6 @@ export default function RecordingPopup(): React.JSX.Element {
           style={{ height: 18 }}
         />
 
-        {/* Timer */}
         <span className="text-white/60 text-[10px] font-mono shrink-0 tabular-nums leading-none">
           {formatTime(elapsed)}
         </span>

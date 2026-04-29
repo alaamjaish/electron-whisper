@@ -20,13 +20,18 @@ const api = {
   sendAudioChunk: (chunk: ArrayBuffer): void => ipcRenderer.send('audio-chunk', chunk),
   sendSampleRate: (rate: number): void => ipcRenderer.send('sample-rate', rate),
   sendMicReady: (): void => ipcRenderer.send('mic-ready'),
+  sendMicDevices: (devices: string[]): void => ipcRenderer.send('mic-devices', devices),
+  sendMicDevice: (device: string): void => ipcRenderer.send('mic-device', device),
+  sendAudioStarted: (): void => ipcRenderer.send('audio-started'),
+  sendMicError: (message: string): void => ipcRenderer.send('mic-error', message),
+  sendRendererReady: (): void => ipcRenderer.send('renderer-ready'),
 
   // Events from main
   onTranscriptToken: (callback: (token: string, isFinal: boolean) => void): void => {
     ipcRenderer.on('transcript-token', (_event, token, isFinal) => callback(token, isFinal))
   },
-  onRecordingStateChange: (callback: (state: string) => void): void => {
-    ipcRenderer.on('recording-state', (_event, state) => callback(state))
+  onRecordingStateChange: (callback: (state: string, reason?: string) => void): void => {
+    ipcRenderer.on('recording-state', (_event, state, reason) => callback(state, reason))
   },
   onNavigate: (callback: (view: string) => void): void => {
     ipcRenderer.on('navigate', (_event, view) => callback(view))

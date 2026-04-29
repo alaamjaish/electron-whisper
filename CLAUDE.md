@@ -66,3 +66,6 @@ JSON files in `app.getPath('userData')`:
 
 - **Alt+Shift+L** — Toggle recording
 - **Alt+Shift+K** — Toggle history panel
+
+
+لما تسوي commit اكتب تفاصيل كفاية في الوصف حتى نستطيع نرجع لههم بسهولة بالمستتقبل

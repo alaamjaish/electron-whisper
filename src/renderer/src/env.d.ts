@@ -12,8 +12,13 @@ interface ElectronAPI {
   sendAudioChunk: (chunk: ArrayBuffer) => void
   sendSampleRate: (rate: number) => void
   sendMicReady: () => void
+  sendMicDevices: (devices: string[]) => void
+  sendMicDevice: (device: string) => void
+  sendAudioStarted: () => void
+  sendMicError: (message: string) => void
+  sendRendererReady: () => void
   onTranscriptToken: (callback: (token: string, isFinal: boolean) => void) => void
-  onRecordingStateChange: (callback: (state: string) => void) => void
+  onRecordingStateChange: (callback: (state: string, reason?: string) => void) => void
   onNavigate: (callback: (view: string) => void) => void
   removeAllListeners: (channel: string) => void
 }
