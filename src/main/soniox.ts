@@ -91,7 +91,7 @@ export class SonioxClient {
       this.ws.on('open', () => {
         const config = {
           api_key: this.apiKey,
-          model: 'stt-rt-v4',
+          model: 'stt-rt-v5',
           audio_format: 'pcm_s16le',
           sample_rate: this.sampleRate,
           num_channels: 1,

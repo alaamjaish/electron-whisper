@@ -10,7 +10,7 @@ LocalTranscriber lives in your system tray. Tap **Alt+Shift+L** to start recordi
 
 - **Global hotkey** — Alt+Shift+L to toggle recording from anywhere
 - **Direct cursor injection** — text appears where you're typing; no copy/paste, no clipboard surprises
-- **Real-time streaming** — see words land as you speak (powered by Soniox `stt-rt-v4`)
+- **Real-time streaming** — see words land as you speak (powered by Soniox `stt-rt-v5`)
 - **History panel** — Alt+Shift+K opens the last 100 transcripts; click to paste, copy, or delete
 - **Tiny recording popup** — non-focus-stealing pill that shows mic level and elapsed time
 - **Auto-start with Windows** — runs quietly in the system tray
@@ -67,7 +67,7 @@ The history panel shows the last 100 transcripts. Click any entry to paste it in
 ## How it works
 
 ```
-[ Mic ] → [ Renderer (React) ] → IPC → [ Main (Electron) ] → WebSocket → [ Soniox stt-rt-v4 ]
+[ Mic ] → [ Renderer (React) ] → IPC → [ Main (Electron) ] → WebSocket → [ Soniox stt-rt-v5 ]
                                                                                   │
                                                                                   ▼
 [ Active window ] ← Windows SendInput ← [ typing.ts ] ← hypothesis tokens ────────┘
@@ -133,7 +133,7 @@ src/
 - [Tailwind CSS v4](https://tailwindcss.com/) (via `@tailwindcss/vite`)
 - [`koffi`](https://www.npmjs.com/package/koffi) for FFI into `user32.dll`
 - [`ws`](https://www.npmjs.com/package/ws) for the Soniox WebSocket
-- [Soniox](https://soniox.com/) `stt-rt-v4` model
+- [Soniox](https://soniox.com/) `stt-rt-v5` model
 
 ## Privacy
 
