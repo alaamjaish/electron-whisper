@@ -7,6 +7,8 @@ const userDataPath = app.getPath('userData')
 
 export interface Settings {
   apiKey: string
+  // Preferred input deviceId; empty/undefined means automatic selection.
+  micDeviceId?: string
 }
 
 export interface HistoryEntry {

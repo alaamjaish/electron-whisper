@@ -31,15 +31,15 @@ Three Electron layers with distinct roles:
 1. User presses Alt+Shift+L → `startRecording()` in main
 2. Main saves focused window handle (`GetForegroundWindow`), shows recording popup with `showInactive()` (no focus steal)
 3. `RecordingPopup` mounts → starts mic via `getUserMedia` → sends `mic-ready` IPC
-4. Main receives `mic-ready` → creates `SonioxClient` → connects WebSocket
-5. Renderer sends PCM Int16 audio chunks via IPC → main forwards to Soniox
+4. Main receives `mic-ready`/first audio → connects Soniox WebSocket (6s timeout, up to 3 attempts with a fresh socket; popup dot is amber while connecting/retrying, red when live via `soniox-status` IPC)
+5. Renderer sends PCM Int16 audio chunks via IPC → queued in main (`pendingAudioChunks`) until Soniox is connected, then forwarded; `sonioxClient` is only assigned after a successful connect so a failed attempt never swallows audio
 6. Soniox sends token responses → `SonioxClient` builds full hypothesis (`committedText + pendingText`) → single callback
 7. `streamType()` in typing.ts diffs against what's already on screen, sends minimal keystrokes via SendInput
 8. User presses Alt+Shift+L again → `stopRecording()` → navigates to 'idle' (unmounts RecordingPopup for clean next session)
 
 ### Key Design Decisions
 
-**Append-only typing with MAX_BACKSPACE=3:** Soniox revises hypotheses which could delete large chunks of text. The typing system never backspaces more than 3 chars. For large revisions where text grew, it appends only the new tail. For shrinking revisions, it does nothing.
+**Append-only typing with MAX_BACKSPACE=3:** Soniox revises hypotheses which could delete large chunks of text. The typing system never backspaces more than 3 chars. When a revision lands further back than that, the screen diverges from the hypothesis and the diverged region is frozen. From then on typing.ts diffs each new hypothesis against the *previous hypothesis* (never against screen length — that offset drifts after divergence and types shifted/duplicated fragments): pure appends are typed, small end-of-hypothesis revisions are fixed when their old tail is still on screen, and mid-hypothesis revisions are skipped.
 
 **Full hypothesis pattern:** `soniox.ts` accumulates all finalized tokens into `committedText` and sends `committedText + pendingText` as a single string. This prevents flicker from separate final/pending callbacks.
 
@@ -59,7 +59,7 @@ Uses `koffi` FFI to call `user32.dll`:
 ### Data Storage (`src/main/store.ts`)
 
 JSON files in `app.getPath('userData')`:
-- `settings.json` — API key
+- `settings.json` — API key + preferred mic deviceId
 - `history.json` — last 100 transcriptions
 
 ## Global Shortcuts

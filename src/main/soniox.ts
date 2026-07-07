@@ -17,7 +17,7 @@ type HypothesisCallback = (fullText: string) => void
 type FinishCallback = (fullText: string) => void
 type FailureCallback = (reason: string) => void
 
-const CONNECT_TIMEOUT_MS = 12000
+const CONNECT_TIMEOUT_MS = 6000
 
 export class SonioxClient {
   private ws: WebSocket | null = null
@@ -246,6 +246,17 @@ export class SonioxClient {
       log('SONIOX', 'Closing WebSocket connection')
       this.manuallyClosing = true
       this.ws.close()
+      this.ws = null
+    }
+  }
+
+  // Kill a client whose connection attempt failed without firing any further
+  // callbacks (terminate() still emits error/close events asynchronously).
+  abandon(): void {
+    this.manuallyClosing = true
+    this.stopping = true
+    if (this.ws) {
+      this.ws.terminate()
       this.ws = null
     }
   }

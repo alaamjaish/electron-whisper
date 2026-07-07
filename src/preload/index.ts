@@ -2,8 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
   // Settings
-  getSettings: (): Promise<{ apiKey: string }> => ipcRenderer.invoke('get-settings'),
-  saveSettings: (settings: { apiKey: string }): Promise<void> =>
+  getSettings: (): Promise<{ apiKey: string; micDeviceId?: string }> =>
+    ipcRenderer.invoke('get-settings'),
+  saveSettings: (settings: { apiKey: string; micDeviceId?: string }): Promise<void> =>
     ipcRenderer.invoke('save-settings', settings),
 
   // History
@@ -35,6 +36,9 @@ const api = {
   },
   onNavigate: (callback: (view: string) => void): void => {
     ipcRenderer.on('navigate', (_event, view) => callback(view))
+  },
+  onSonioxStatus: (callback: (status: string) => void): void => {
+    ipcRenderer.on('soniox-status', (_event, status) => callback(status))
   },
 
   // Cleanup
