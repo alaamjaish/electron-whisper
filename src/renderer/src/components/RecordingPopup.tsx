@@ -46,6 +46,7 @@ function pickInputDevice(devices: MediaDeviceInfo[]): MediaDeviceInfo | null {
 export default function RecordingPopup(): React.JSX.Element {
   const [audioLevel, setAudioLevel] = useState(0)
   const [isRecording, setIsRecording] = useState(false)
+  const [sonioxStatus, setSonioxStatus] = useState('connecting')
   const [elapsed, setElapsed] = useState(0)
   const streamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -126,6 +127,8 @@ export default function RecordingPopup(): React.JSX.Element {
           throw new Error('getUserMedia is not available')
         }
 
+        const settings = await window.api.getSettings()
+
         const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const devices = await navigator.mediaDevices.enumerateDevices()
         const inputDevices = devices.filter((device) => device.kind === 'audioinput')
@@ -133,7 +136,12 @@ export default function RecordingPopup(): React.JSX.Element {
           inputDevices.map((device) => `${device.label || '(unlabeled audio input)'} [${device.deviceId}]`)
         )
 
-        const selectedDevice = pickInputDevice(devices)
+        // A mic explicitly chosen in Settings wins; auto-scoring is the fallback
+        // (also when the chosen device is unplugged).
+        const preferredDevice = settings.micDeviceId
+          ? inputDevices.find((device) => device.deviceId === settings.micDeviceId) ?? null
+          : null
+        const selectedDevice = preferredDevice ?? pickInputDevice(devices)
         window.api.sendMicDevice(
           selectedDevice
             ? `${selectedDevice.label || '(unlabeled audio input)'} [${selectedDevice.deviceId}]`
@@ -299,12 +307,22 @@ export default function RecordingPopup(): React.JSX.Element {
       if (state === 'stopped' || state === 'error') cleanup()
     })
 
+    window.api.onSonioxStatus((status) => {
+      setSonioxStatus(status)
+    })
+
     return (): void => {
       mountedRef.current = false
       cleanup()
       window.api.removeAllListeners('recording-state')
+      window.api.removeAllListeners('soniox-status')
     }
   }, [])
+
+  // Dot color doubles as connection state: amber while the Soniox link is
+  // connecting/retrying, red once transcription is live.
+  const live = sonioxStatus === 'connected'
+  const dotRgb = live ? '239,68,68' : '245,158,11'
 
   return (
     <div
@@ -319,7 +337,7 @@ export default function RecordingPopup(): React.JSX.Element {
               style={{
                 width: `${8 + audioLevel * 6}px`,
                 height: `${8 + audioLevel * 6}px`,
-                backgroundColor: `rgba(239,68,68,${0.15 + audioLevel * 0.2})`,
+                backgroundColor: `rgba(${dotRgb},${0.15 + audioLevel * 0.2})`,
                 transition: 'all 0.1s ease-out'
               }}
             />
@@ -327,9 +345,9 @@ export default function RecordingPopup(): React.JSX.Element {
           <div
             className="w-[6px] h-[6px] rounded-full"
             style={{
-              backgroundColor: isRecording ? '#ef4444' : '#555',
+              backgroundColor: isRecording ? `rgb(${dotRgb})` : '#555',
               boxShadow: isRecording
-                ? `0 0 ${3 + audioLevel * 6}px rgba(239,68,68,${0.5 + audioLevel * 0.5})`
+                ? `0 0 ${3 + audioLevel * 6}px rgba(${dotRgb},${0.5 + audioLevel * 0.5})`
                 : 'none',
               transition: 'box-shadow 0.1s ease-out'
             }}

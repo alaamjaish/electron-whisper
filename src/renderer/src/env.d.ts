@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ElectronAPI {
-  getSettings: () => Promise<{ apiKey: string }>
-  saveSettings: (settings: { apiKey: string }) => Promise<void>
+  getSettings: () => Promise<{ apiKey: string; micDeviceId?: string }>
+  saveSettings: (settings: { apiKey: string; micDeviceId?: string }) => Promise<void>
   getHistory: () => Promise<Array<{ id: string; text: string; timestamp: number }>>
   deleteHistoryEntry: (id: string) => Promise<void>
   copyToClipboard: (text: string) => Promise<void>
@@ -20,6 +20,7 @@ interface ElectronAPI {
   onTranscriptToken: (callback: (token: string, isFinal: boolean) => void) => void
   onRecordingStateChange: (callback: (state: string, reason?: string) => void) => void
   onNavigate: (callback: (view: string) => void) => void
+  onSonioxStatus: (callback: (status: string) => void) => void
   removeAllListeners: (channel: string) => void
 }
 

@@ -39,7 +39,7 @@ Three Electron layers with distinct roles:
 
 ### Key Design Decisions
 
-**Append-only typing with MAX_BACKSPACE=3:** Soniox revises hypotheses which could delete large chunks of text. The typing system never backspaces more than 3 chars. For large revisions where text grew, it appends only the new tail. For shrinking revisions, it does nothing.
+**Append-only typing with MAX_BACKSPACE=3:** Soniox revises hypotheses which could delete large chunks of text. The typing system never backspaces more than 3 chars. When a revision lands further back than that, the screen diverges from the hypothesis and the diverged region is frozen. From then on typing.ts diffs each new hypothesis against the *previous hypothesis* (never against screen length — that offset drifts after divergence and types shifted/duplicated fragments): pure appends are typed, small end-of-hypothesis revisions are fixed when their old tail is still on screen, and mid-hypothesis revisions are skipped.
 
 **Full hypothesis pattern:** `soniox.ts` accumulates all finalized tokens into `committedText` and sends `committedText + pendingText` as a single string. This prevents flicker from separate final/pending callbacks.
 
@@ -59,7 +59,7 @@ Uses `koffi` FFI to call `user32.dll`:
 ### Data Storage (`src/main/store.ts`)
 
 JSON files in `app.getPath('userData')`:
-- `settings.json` — API key
+- `settings.json` — API key + preferred mic deviceId
 - `history.json` — last 100 transcriptions
 
 ## Global Shortcuts

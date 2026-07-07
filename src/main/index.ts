@@ -32,6 +32,7 @@ let rendererReady = false
 let isRecording = false
 let currentView: View = 'idle'
 let sonioxClient: SonioxClient | null = null
+let connectingClient: SonioxClient | null = null
 let audioSampleRate = 48000
 let recordingSessionId = 0
 let sonioxConnecting = false
@@ -45,7 +46,10 @@ const RECORDING_POPUP_WIDTH = 130
 const RECORDING_POPUP_HEIGHT = 34
 const MIC_READY_TIMEOUT_MS = 10000
 const AUDIO_STARTED_TIMEOUT_MS = 12000
-const MAX_PENDING_AUDIO_CHUNKS = 150
+// Audio buffered in main while Soniox connects/retries: ~85ms per chunk at 48kHz,
+// so 400 chunks covers ~34s — enough to survive all connection attempts.
+const MAX_PENDING_AUDIO_CHUNKS = 400
+const SONIOX_CONNECT_ATTEMPTS = 3
 
 process.on('uncaughtException', (err) => {
   log('FATAL', 'Uncaught exception', err)
@@ -271,6 +275,11 @@ function startRecording(): void {
     sonioxClient.disconnect()
     sonioxClient = null
   }
+  if (connectingClient) {
+    log('MAIN', 'Abandoning previous in-flight Soniox connection')
+    connectingClient.abandon()
+    connectingClient = null
+  }
 
   isRecording = true
   recordingSessionId++
@@ -341,60 +350,85 @@ function getPcmStats(buf: Buffer): { rms: number; peak: number } {
   }
 }
 
+function sendSonioxStatus(status: 'connecting' | 'connected' | 'retrying'): void {
+  mainWindow?.webContents.send('soniox-status', status)
+}
+
 async function connectSoniox(sessionId: number): Promise<void> {
   const settings = getSettings()
-  log('MAIN', `Connecting to Soniox (sample rate: ${audioSampleRate})...`)
+  sendSonioxStatus('connecting')
 
-  const client = new SonioxClient(
-    settings.apiKey,
-    audioSampleRate,
-    (fullText) => {
-      if (!isRecording || recordingSessionId !== sessionId) return
-      log('TRANSCRIPT', `"${fullText.length > 80 ? fullText.substring(0, 80) + '...' : fullText}" (${fullText.length} chars)`)
-      mainWindow?.webContents.send('transcript-token', fullText)
-      streamType(fullText)
-    },
-    (fullText) => {
-      log('TRANSCRIPT', `=== SESSION FINISHED === Total: ${fullText.length} chars`)
-      log('TRANSCRIPT', `Final text: "${fullText.substring(0, 200)}"`)
-      if (fullText.trim()) {
-        addHistoryEntry(fullText.trim())
-        log('HISTORY', 'Entry saved to history')
+  for (let attempt = 1; attempt <= SONIOX_CONNECT_ATTEMPTS; attempt++) {
+    if (!isRecording || recordingSessionId !== sessionId) return
+
+    log('MAIN', `Connecting to Soniox (attempt ${attempt}/${SONIOX_CONNECT_ATTEMPTS}, sample rate: ${audioSampleRate})...`)
+
+    const client = new SonioxClient(
+      settings.apiKey,
+      audioSampleRate,
+      (fullText) => {
+        if (!isRecording || recordingSessionId !== sessionId) return
+        log('TRANSCRIPT', `"${fullText.length > 80 ? fullText.substring(0, 80) + '...' : fullText}" (${fullText.length} chars)`)
+        mainWindow?.webContents.send('transcript-token', fullText)
+        streamType(fullText)
+      },
+      (fullText) => {
+        log('TRANSCRIPT', `=== SESSION FINISHED === Total: ${fullText.length} chars`)
+        log('TRANSCRIPT', `Final text: "${fullText.substring(0, 200)}"`)
+        if (fullText.trim()) {
+          addHistoryEntry(fullText.trim())
+          log('HISTORY', 'Entry saved to history')
+        }
+      },
+      (reason) => {
+        if (recordingSessionId !== sessionId) return
+        if (sonioxClient !== client) return
+        failRecording(`Soniox connection failed: ${reason}`)
       }
-    },
-    (reason) => {
-      if (recordingSessionId !== sessionId) return
-      failRecording(`Soniox connection failed: ${reason}`)
-    }
-  )
+    )
 
-  sonioxClient = client
+    connectingClient = client
 
-  try {
-    await client.connect()
-    if (!isRecording || recordingSessionId !== sessionId || sonioxClient !== client) {
-      log('MAIN', 'Soniox connected for stale session; disconnecting')
-      client.disconnect()
+    try {
+      await client.connect()
+      connectingClient = null
+
+      if (!isRecording || recordingSessionId !== sessionId) {
+        log('MAIN', 'Soniox connected for stale session; disconnecting')
+        client.disconnect()
+        return
+      }
+
+      // Only now does the client become the live one — audio stays in
+      // pendingAudioChunks during connect/retries so nothing is lost with a
+      // client that never opens.
+      sonioxClient = client
+      sonioxConnecting = false
+      log('MAIN', `Soniox connected and ready for audio (attempt ${attempt})`)
+      sendSonioxStatus('connected')
+
+      if (pendingAudioChunks.length > 0) {
+        log('AUDIO', `Flushing ${pendingAudioChunks.length} pending chunks queued before Soniox was ready`)
+        for (const chunk of pendingAudioChunks) {
+          client.sendAudio(chunk)
+        }
+        pendingAudioChunks = []
+      }
       return
-    }
+    } catch (err) {
+      connectingClient = null
+      client.abandon()
 
-    sonioxConnecting = false
-    log('MAIN', 'Soniox connected and ready for audio')
+      if (!isRecording || recordingSessionId !== sessionId) return
 
-    if (pendingAudioChunks.length > 0) {
-      log('AUDIO', `Flushing ${pendingAudioChunks.length} pending chunks queued before Soniox was ready`)
-      for (const chunk of pendingAudioChunks) {
-        client.sendAudio(chunk)
+      if (attempt < SONIOX_CONNECT_ATTEMPTS) {
+        log('MAIN', `Soniox connect attempt ${attempt} failed (${err}); retrying with a fresh socket`)
+        sendSonioxStatus('retrying')
+        continue
       }
-      pendingAudioChunks = []
-    }
-  } catch (err) {
-    if (sonioxClient === client) {
-      sonioxClient = null
-    }
-    sonioxConnecting = false
-    if (isRecording && recordingSessionId === sessionId) {
-      failRecording(`Failed to connect to Soniox: ${err}`)
+
+      sonioxConnecting = false
+      failRecording(`Failed to connect to Soniox after ${SONIOX_CONNECT_ATTEMPTS} attempts: ${err}`)
     }
   }
 }
@@ -406,11 +440,15 @@ function failRecording(reason: string): void {
 }
 
 function stopRecording(reason = 'user'): void {
-  if (!isRecording && !sonioxClient && !sonioxConnecting) return
+  if (!isRecording && !sonioxClient && !sonioxConnecting && !connectingClient) return
 
   log('MAIN', `--- STOP RECORDING session #${recordingSessionId}; reason=${reason} ---`)
   isRecording = false
   sonioxConnecting = false
+  if (connectingClient) {
+    connectingClient.abandon()
+    connectingClient = null
+  }
   clearRecordingGuards()
   mainWindow?.webContents.send('recording-state', 'stopped', reason)
   navigateTo('idle')
@@ -453,7 +491,7 @@ function showSettings(): void {
   const win = ensureWindow()
   if (isRecording) stopRecording('open settings')
   navigateTo('settings')
-  win.setSize(400, 300)
+  win.setSize(400, 380)
   win.center()
   win.show()
   win.focus()

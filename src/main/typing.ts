@@ -45,24 +45,6 @@ function commonPrefix(a: string, b: string): number {
   return len
 }
 
-function sendChars(text: string): void {
-  if (!sendInputFn || text.length === 0) return
-  const totalEvents = text.length * 2
-  const buffer = Buffer.alloc(totalEvents * INPUT_SIZE, 0)
-  let offset = 0
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i)
-    writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE)
-    offset += INPUT_SIZE
-    writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
-    offset += INPUT_SIZE
-  }
-  const sent = sendInputFn(totalEvents, buffer, INPUT_SIZE)
-  if (sent !== totalEvents) {
-    log('TYPING', `SendInput only sent ${sent}/${totalEvents} events`)
-  }
-}
-
 let savedHwnd: unknown = null
 
 export function saveFocusedWindow(): void {
@@ -90,9 +72,39 @@ export function restoreFocusedWindow(): void {
 }
 
 let screenText = ''
+let lastHypothesis = ''
+
+function sendKeystrokes(backspaces: number, text: string): void {
+  if (!sendInputFn) return
+  const totalEvents = (backspaces + text.length) * 2
+  if (totalEvents === 0) return
+
+  const buffer = Buffer.alloc(totalEvents * INPUT_SIZE, 0)
+  let offset = 0
+  for (let i = 0; i < backspaces; i++) {
+    writeKey(buffer, offset, VK_BACK, 0, 0)
+    offset += INPUT_SIZE
+    writeKey(buffer, offset, VK_BACK, 0, KEYEVENTF_KEYUP)
+    offset += INPUT_SIZE
+  }
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE)
+    offset += INPUT_SIZE
+    writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+    offset += INPUT_SIZE
+  }
+
+  const sent = sendInputFn(totalEvents, buffer, INPUT_SIZE)
+  if (sent !== totalEvents) {
+    log('TYPING', `SendInput only sent ${sent}/${totalEvents} events`)
+  }
+}
 
 export function streamType(fullText: string): void {
   if (!init() || !sendInputFn) return
+  const prevHypothesis = lastHypothesis
+  lastHypothesis = fullText
   if (fullText === screenText) return
 
   const shared = commonPrefix(screenText, fullText)
@@ -100,8 +112,7 @@ export function streamType(fullText: string): void {
 
   if (charsToDelete <= MAX_BACKSPACE) {
     const newChars = fullText.substring(shared)
-    const totalEvents = (charsToDelete + newChars.length) * 2
-    if (totalEvents === 0) return
+    if (charsToDelete === 0 && newChars.length === 0) return
 
     if (charsToDelete > 0) {
       log('TYPING', `Backspace ${charsToDelete} + type "${newChars}" (screen: ${screenText.length}->${fullText.length} chars)`)
@@ -109,37 +120,40 @@ export function streamType(fullText: string): void {
       log('TYPING', `Append: "${newChars}" (screen: ${screenText.length}->${fullText.length} chars)`)
     }
 
-    const buffer = Buffer.alloc(totalEvents * INPUT_SIZE, 0)
-    let offset = 0
-    for (let i = 0; i < charsToDelete; i++) {
-      writeKey(buffer, offset, VK_BACK, 0, 0)
-      offset += INPUT_SIZE
-      writeKey(buffer, offset, VK_BACK, 0, KEYEVENTF_KEYUP)
-      offset += INPUT_SIZE
-    }
-    for (let i = 0; i < newChars.length; i++) {
-      const code = newChars.charCodeAt(i)
-      writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE)
-      offset += INPUT_SIZE
-      writeKey(buffer, offset, 0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
-      offset += INPUT_SIZE
-    }
-
-    const sent = sendInputFn(totalEvents, buffer, INPUT_SIZE)
-    if (sent !== totalEvents) {
-      log('TYPING', `SendInput only sent ${sent}/${totalEvents} events`)
-    }
+    sendKeystrokes(charsToDelete, newChars)
     screenText = fullText
-  } else if (fullText.length > screenText.length) {
-    const newChars = fullText.substring(screenText.length)
-    if (newChars.length > 0) {
-      log('TYPING', `Large revision (would delete ${charsToDelete}) - append-only: "${newChars}"`)
-      sendChars(newChars)
-      screenText = screenText + newChars
-    }
-  } else {
-    log('TYPING', `Large revision + text shrank (delete ${charsToDelete}, new ${fullText.length - shared}) - skipped`)
+    return
   }
+
+  // The screen has diverged from the hypothesis (a revision landed further back
+  // than the backspace budget). The diverged region is frozen on screen; from here
+  // we diff against the PREVIOUS HYPOTHESIS, never against screen length — a
+  // length-based offset into a diverged string types shifted/duplicated fragments.
+  const sharedHyp = commonPrefix(prevHypothesis, fullText)
+
+  if (sharedHyp === prevHypothesis.length) {
+    // Pure append: everything before is unchanged, only new speech was added.
+    const newChars = fullText.substring(prevHypothesis.length)
+    if (newChars.length > 0) {
+      log('TYPING', `Diverged (revision ${charsToDelete} back) - typing new speech only: "${newChars}"`)
+      sendKeystrokes(0, newChars)
+      screenText += newChars
+    }
+    return
+  }
+
+  // Small revision at the very end of the hypothesis whose old tail is actually
+  // on screen: safe to fix with backspaces even while diverged earlier.
+  const revisedTail = prevHypothesis.substring(sharedHyp)
+  if (revisedTail.length <= MAX_BACKSPACE && screenText.endsWith(revisedTail)) {
+    const newChars = fullText.substring(sharedHyp)
+    log('TYPING', `Diverged tail fix: backspace ${revisedTail.length} + type "${newChars}"`)
+    sendKeystrokes(revisedTail.length, newChars)
+    screenText = screenText.substring(0, screenText.length - revisedTail.length) + newChars
+    return
+  }
+
+  log('TYPING', `Revision ${prevHypothesis.length - sharedHyp} chars back in hypothesis; screen frozen - skipped`)
 }
 
 const VK_CONTROL = 0x11
@@ -163,4 +177,5 @@ export function pasteText(text: string): void {
 export function resetTyping(): void {
   log('TYPING', `Reset (was ${screenText.length} chars on screen)`)
   screenText = ''
+  lastHypothesis = ''
 }
