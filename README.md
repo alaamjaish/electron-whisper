@@ -65,7 +65,7 @@ This produces an NSIS installer in `dist/`. Double-click to install; LocalTransc
 | **Front mouse side button** (Forward, nearer the screen) | Open / close history panel *(if turned on in Settings)* |
 | Tray menu | Quick access to Start, History, Settings, Quit |
 
-**Mouse side buttons** are off by default. Turn them on in Settings → *Mouse side buttons* → Save. They are read by a low-level mouse hook that runs on its own thread, so the pointer never lags. While the option is on and the app runs, those two buttons no longer do Back/Forward in browsers or Explorer; untick the option (or quit the app) and they go back to normal.
+**Mouse side buttons** are off by default. Turn them on in Settings → *Mouse side buttons* → Save. They are read by a low-level mouse hook that runs in a small separate helper process (built-in Windows PowerShell), so the pointer never lags and a problem in the hook can't take the app down; if the helper stops, the app restarts it. While the option is on and the app runs, those two buttons no longer do Back/Forward in browsers or Explorer; untick the option (or quit the app) and they go back to normal.
 
 While recording, a small pill appears centered on your active display showing the mic level and elapsed time. It does **not** steal focus — you keep typing into whatever window you had active. Speak, and the text streams in there.
 
@@ -120,8 +120,7 @@ src/
     index.ts           App lifecycle, tray, shortcuts, recording orchestration, IPC
     soniox.ts          Soniox WebSocket client
     typing.ts          Windows SendInput / focus management (the platform-specific bit)
-    mouseButtons.ts    Maps the mouse side buttons to record / history
-    mouseHook.worker.ts  Low-level mouse hook on its own thread (Windows-only)
+    mouseButtons.ts    Mouse side buttons: runs the hook helper process, maps presses to record / history (Windows-only)
     store.ts           JSON persistence for settings + history
     logger.ts          File + console logger
   preload/

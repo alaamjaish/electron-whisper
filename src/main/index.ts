@@ -51,6 +51,8 @@ const AUDIO_STARTED_TIMEOUT_MS = 12000
 // so 400 chunks covers ~34s — enough to survive all connection attempts.
 const MAX_PENDING_AUDIO_CHUNKS = 400
 const SONIOX_CONNECT_ATTEMPTS = 3
+// Passed by every automatic launch at sign-in.
+const AUTOSTART_ARG = '--autostart'
 
 process.on('uncaughtException', (err) => {
   log('FATAL', 'Uncaught exception', err)
@@ -706,7 +708,13 @@ app.whenReady().then(() => {
     return
   }
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    // Two autostarts can race at sign-in (the Run entry and an optional
+    // scheduled task); the later one should quit quietly, not pop Settings open.
+    if (argv.includes(AUTOSTART_ARG)) {
+      log('APP', 'Second autostart instance ignored; already running')
+      return
+    }
     log('APP', 'Second instance requested; focusing existing instance')
     showCurrentOrSettings()
   })
@@ -721,7 +729,8 @@ app.whenReady().then(() => {
 
   app.setLoginItemSettings({
     openAtLogin: true,
-    path: app.getPath('exe')
+    path: app.getPath('exe'),
+    args: [AUTOSTART_ARG]
   })
 })
 
