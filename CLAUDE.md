@@ -59,13 +59,23 @@ Uses `koffi` FFI to call `user32.dll`:
 ### Data Storage (`src/main/store.ts`)
 
 JSON files in `app.getPath('userData')`:
-- `settings.json` — API key + preferred mic deviceId
+- `settings.json` — API key + preferred mic deviceId + optional `mouseButtons` (off by default)
 - `history.json` — last 100 transcriptions
 
 ## Global Shortcuts
 
 - **Alt+Shift+L** — Toggle recording
 - **Alt+Shift+K** — Toggle history panel
+- **Mouse side buttons** (opt-in) — rear (XBUTTON1, Back) toggles recording, front (XBUTTON2, Forward) toggles history
+
+### Mouse side buttons (`src/main/mouseButtons.ts`, `src/main/mouseHook.worker.ts`)
+
+- **Off by default** (`settings.mouseButtons`, a checkbox in Settings). It takes Back/Forward away from every other app, so it must never turn on for a user who didn't ask. `applyMouseButtonsSetting()` runs at startup and on every `save-settings`; `SetupScreen` saves only `apiKey`, which leaves it off.
+- A `WH_MOUSE_LL` hook via `koffi`, installed in a **Node worker thread** (electron-vite `?nodeWorker` import) that only pumps `GetMessageW`. Windows waits on the hook thread for every mouse event system-wide, so on the busy main thread it would make the whole system's pointer stutter. Keep the hook callback cheap; it runs for every mouse move.
+- XBUTTON1/2 down **and** up are swallowed (`return 1`), so apps never see Back/Forward; down posts `{ type: 'press' }` to main. A 300 ms per-button debounce guards against double toggles.
+- Stopping: `GetMessageW` can't be interrupted by `worker.terminate()`, so main posts `WM_QUIT` to the worker's thread id (`PostThreadMessageW`); the worker then unhooks and exits.
+- Windows silently drops a low-level hook that ever times out, with no signal, so `powerMonitor` resume/unlock reinstall it (`restartMouseButtons()`).
+- Logs under the `MOUSE` tag; `Side-button hook installed` means it is live.
 
 
 لما تسوي commit اكتب تفاصيل كفاية في الوصف حتى نستطيع نرجع لههم بسهولة بالمستتقبل

@@ -23,6 +23,7 @@ import {
   restoreFocusedWindow
 } from './typing'
 import { configureLogger, getLogFilePath, log } from './logger'
+import { startMouseButtons, stopMouseButtons, restartMouseButtons } from './mouseButtons'
 
 type View = 'setup' | 'idle' | 'recording' | 'history' | 'settings'
 
@@ -172,6 +173,7 @@ function createWindow(): void {
     } else {
       log('MAIN', `API key found (${settings.apiKey.substring(0, 8)}...), app ready in tray`)
       log('MAIN', 'Shortcuts: Alt+Shift+L = record, Alt+Shift+K = history')
+      log('MAIN', `Mouse side buttons: ${settings.mouseButtons ? 'on (rear = record, front = history)' : 'off'}`)
     }
   })
 
@@ -248,6 +250,14 @@ function registerShortcuts(): void {
     log('SHORTCUT', 'FAILED to register Alt+Shift+K. Another app or stale process may own it.')
   } else {
     log('SHORTCUT', 'Registered Alt+Shift+K')
+  }
+}
+
+function applyMouseButtonsSetting(enabled: boolean | undefined): void {
+  if (enabled) {
+    startMouseButtons({ onRecord: toggleRecording, onHistory: toggleHistory })
+  } else {
+    stopMouseButtons()
   }
 }
 
@@ -491,7 +501,7 @@ function showSettings(): void {
   const win = ensureWindow()
   if (isRecording) stopRecording('open settings')
   navigateTo('settings')
-  win.setSize(400, 380)
+  win.setSize(400, 460)
   win.center()
   win.show()
   win.focus()
@@ -507,6 +517,7 @@ function setupIPC(): void {
   ipcMain.handle('save-settings', (_event, settings) => {
     log('IPC', `save-settings (key: ${settings.apiKey?.substring(0, 8)}...)`)
     saveSettings(settings)
+    applyMouseButtonsSetting(settings.mouseButtons)
     navigateTo('idle')
     mainWindow?.hide()
   })
@@ -660,6 +671,7 @@ function setupPowerHandlers(): void {
     }
     clearRecordingGuards()
     registerShortcuts()
+    restartMouseButtons()
   })
 
   powerMonitor.on('lock-screen', () => {
@@ -672,6 +684,7 @@ function setupPowerHandlers(): void {
   powerMonitor.on('unlock-screen', () => {
     log('POWER', 'Screen unlocked; re-registering shortcuts')
     registerShortcuts()
+    restartMouseButtons()
   })
 }
 
@@ -702,6 +715,7 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   registerShortcuts()
+  applyMouseButtonsSetting(getSettings().mouseButtons)
   setupPowerHandlers()
   log('APP', 'Tray + shortcuts registered. App ready.')
 
@@ -714,6 +728,7 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   log('APP', 'Quitting; unregistering shortcuts')
   globalShortcut.unregisterAll()
+  stopMouseButtons()
 })
 
 app.on('window-all-closed', () => {

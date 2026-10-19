@@ -1,6 +1,6 @@
 {
   "name": "localtranscriber",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A Windows desktop voice-to-text companion. Press a shortcut, speak, and the text streams in at your cursor — works in any app.",
   "main": "./out/main/index.js",
   "author": "Alaa M. Jaish",

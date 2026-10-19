@@ -9,6 +9,9 @@ export interface Settings {
   apiKey: string
   // Preferred input deviceId; empty/undefined means automatic selection.
   micDeviceId?: string
+  // Mouse side buttons drive record/history. Off unless the user turns it on,
+  // because it takes Back/Forward away from every other app.
+  mouseButtons?: boolean
 }
 
 export interface HistoryEntry {

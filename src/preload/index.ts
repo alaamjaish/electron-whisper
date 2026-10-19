@@ -2,9 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
   // Settings
-  getSettings: (): Promise<{ apiKey: string; micDeviceId?: string }> =>
+  getSettings: (): Promise<{ apiKey: string; micDeviceId?: string; mouseButtons?: boolean }> =>
     ipcRenderer.invoke('get-settings'),
-  saveSettings: (settings: { apiKey: string; micDeviceId?: string }): Promise<void> =>
+  saveSettings: (settings: { apiKey: string; micDeviceId?: string; mouseButtons?: boolean }): Promise<void> =>
     ipcRenderer.invoke('save-settings', settings),
 
   // History

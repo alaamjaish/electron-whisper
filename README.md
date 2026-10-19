@@ -9,6 +9,7 @@ LocalTranscriber lives in your system tray. Tap **Alt+Shift+L** to start recordi
 ## Features
 
 - **Global hotkey** — Alt+Shift+L to toggle recording from anywhere
+- **Mouse side buttons (optional, off by default)** — turn on in Settings and the rear side button toggles recording, the front one toggles history; no extra mouse software needed
 - **Direct cursor injection** — text appears where you're typing; no copy/paste, no clipboard surprises
 - **Real-time streaming** — see words land as you speak (powered by Soniox `stt-rt-v5`)
 - **Resilient connection** — if the Soniox handshake hangs, the app retries with a fresh socket while buffering your speech, so nothing is lost
@@ -60,7 +61,11 @@ This produces an NSIS installer in `dist/`. Double-click to install; LocalTransc
 |---|---|
 | **Alt+Shift+L** | Start / stop recording |
 | **Alt+Shift+K** | Open / close history panel |
+| **Rear mouse side button** (Back, nearer the wrist) | Start / stop recording *(if turned on in Settings)* |
+| **Front mouse side button** (Forward, nearer the screen) | Open / close history panel *(if turned on in Settings)* |
 | Tray menu | Quick access to Start, History, Settings, Quit |
+
+**Mouse side buttons** are off by default. Turn them on in Settings → *Mouse side buttons* → Save. They are read by a low-level mouse hook that runs on its own thread, so the pointer never lags. While the option is on and the app runs, those two buttons no longer do Back/Forward in browsers or Explorer; untick the option (or quit the app) and they go back to normal.
 
 While recording, a small pill appears centered on your active display showing the mic level and elapsed time. It does **not** steal focus — you keep typing into whatever window you had active. Speak, and the text streams in there.
 
@@ -115,6 +120,8 @@ src/
     index.ts           App lifecycle, tray, shortcuts, recording orchestration, IPC
     soniox.ts          Soniox WebSocket client
     typing.ts          Windows SendInput / focus management (the platform-specific bit)
+    mouseButtons.ts    Maps the mouse side buttons to record / history
+    mouseHook.worker.ts  Low-level mouse hook on its own thread (Windows-only)
     store.ts           JSON persistence for settings + history
     logger.ts          File + console logger
   preload/
@@ -126,7 +133,7 @@ src/
       App.tsx          View router
       components/
         SetupScreen.tsx     First-run API key prompt
-        SettingsPage.tsx    Edit API key + pick microphone
+        SettingsPage.tsx    Edit API key, pick microphone, mouse side buttons
         RecordingPopup.tsx  The dictation pill (mic, waveform, timer)
         HistoryPanel.tsx    Recent transcripts
 ```
@@ -157,6 +164,8 @@ When you're not recording, no audio is captured.
 **The dot stays amber and nothing types** — the connection to Soniox is slow or down. The app retries automatically (up to 3 attempts) and buffers what you say in the meantime; if it still fails, the popup closes. Check your internet connection and try again.
 
 **Wrong microphone picked up** — open Settings (tray menu) and choose your device from the Microphone dropdown instead of Automatic.
+
+**Mouse side buttons do nothing** — make sure *Mouse side buttons* is ticked in Settings, then check `app.log` for `[MOUSE] Side-button hook installed`. If your mouse software (Logi Options+, Razer Synapse, etc.) remaps the side buttons to something else, the app no longer sees them as side buttons; set them back to Back/Forward there.
 
 **Logs** — `%APPDATA%/localtranscriber/app.log` has timestamped logs of every session (capped at 10 MB, rotated to `app.old.log`). Attach it to issues.
 
