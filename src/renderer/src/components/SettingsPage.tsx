@@ -9,12 +9,14 @@ export default function SettingsPage(): React.JSX.Element {
   const [apiKey, setApiKey] = useState('')
   const [micDeviceId, setMicDeviceId] = useState('')
   const [mics, setMics] = useState<MicOption[]>([])
+  const [mouseButtons, setMouseButtons] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     window.api.getSettings().then((settings) => {
       setApiKey(settings.apiKey || '')
       setMicDeviceId(settings.micDeviceId || '')
+      setMouseButtons(settings.mouseButtons === true)
     })
 
     const loadMics = async (): Promise<void> => {
@@ -37,7 +39,7 @@ export default function SettingsPage(): React.JSX.Element {
   }, [])
 
   const handleSave = async (): Promise<void> => {
-    await window.api.saveSettings({ apiKey: apiKey.trim(), micDeviceId })
+    await window.api.saveSettings({ apiKey: apiKey.trim(), micDeviceId, mouseButtons })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -73,6 +75,25 @@ export default function SettingsPage(): React.JSX.Element {
           </option>
         ))}
       </select>
+
+      <label className="flex items-start gap-3 mb-4 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={mouseButtons}
+          onChange={(e) => {
+            setMouseButtons(e.target.checked)
+            setSaved(false)
+          }}
+          className="mt-0.5 h-4 w-4 accent-blue-600"
+        />
+        <span className="text-sm text-gray-300">
+          Mouse side buttons
+          <span className="block text-xs text-gray-500 mt-0.5">
+            Rear button starts / stops dictation, front button opens history. Their Back / Forward
+            stops working while the app runs.
+          </span>
+        </span>
+      </label>
 
       <button
         onClick={handleSave}

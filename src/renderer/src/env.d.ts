@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ElectronAPI {
-  getSettings: () => Promise<{ apiKey: string; micDeviceId?: string }>
-  saveSettings: (settings: { apiKey: string; micDeviceId?: string }) => Promise<void>
+  getSettings: () => Promise<{ apiKey: string; micDeviceId?: string; mouseButtons?: boolean }>
+  saveSettings: (settings: { apiKey: string; micDeviceId?: string; mouseButtons?: boolean }) => Promise<void>
   getHistory: () => Promise<Array<{ id: string; text: string; timestamp: number }>>
   deleteHistoryEntry: (id: string) => Promise<void>
   copyToClipboard: (text: string) => Promise<void>
