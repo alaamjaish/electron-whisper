@@ -1,45 +1,78 @@
-import type { Worker } from 'worker_threads'
-import createMouseHookWorker from './mouseHook.worker?nodeWorker'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { join } from 'path'
+import { createInterface } from 'readline'
 import { log } from './logger'
 
 // Side buttons on the mouse. XBUTTON1 is the rear one (Back, nearer the wrist),
 // XBUTTON2 the front one (Forward, nearer the screen).
 const XBUTTON1 = 1
 const XBUTTON2 = 2
-const WM_QUIT = 0x0012
 // A second press of the same button inside this window is treated as bounce.
 const DEBOUNCE_MS = 300
-const STOP_TIMEOUT_MS = 1000
+// Restart backoff for a helper that dies; reset once it has run this long.
+const RESTART_DELAYS_MS = [1000, 3000, 10000, 30000]
+const STABLE_AFTER_MS = 60000
+
+// The low-level mouse hook runs in its own helper process (Windows PowerShell +
+// a few lines of C#), never inside Electron. Windows calls a WH_MOUSE_LL hook for
+// every mouse event system-wide; the first version ran it in a worker thread via
+// koffi and took the whole app down with a native crash (0x80000003) after a few
+// minutes. Out of process, a helper crash costs at most a restart of the helper.
+// The helper prints "ready", "press 1" / "press 2", or "error <code>", and exits
+// when its stdin closes, so it can't outlive the app.
+const HOOK_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Windows.Forms;
+public static class LtSideButtons {
+  delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
+  [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+  [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
+  static HookProc proc;
+  static void Say(string line) { try { Console.Out.WriteLine(line); Console.Out.Flush(); } catch { Environment.Exit(0); } }
+  public static void Run() {
+    proc = Callback;
+    if (SetWindowsHookEx(14, proc, GetModuleHandle(null), 0) == IntPtr.Zero) { Say("error " + Marshal.GetLastWin32Error()); return; }
+    var watch = new Thread(() => { try { while (Console.In.Read() != -1) { } } catch { } Environment.Exit(0); });
+    watch.IsBackground = true;
+    watch.Start();
+    Say("ready");
+    Application.Run();
+  }
+  static IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam) {
+    int msg = wParam.ToInt32();
+    if (nCode >= 0 && (msg == 0x020B || msg == 0x020C)) {
+      int button = (int)((uint)Marshal.ReadInt32(lParam, 8) >> 16);
+      if (button == 1 || button == 2) {
+        if (msg == 0x020B) Say("press " + button);
+        return (IntPtr)1;
+      }
+    }
+    return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+  }
+}
+'@
+[LtSideButtons]::Run()
+`
 
 type Handlers = { onRecord: () => void; onHistory: () => void }
-type WorkerMessage =
-  | { type: 'ready'; threadId: number }
-  | { type: 'press'; button: number }
-  | { type: 'error'; message: string }
 
 let handlers: Handlers | null = null
 let enabled = false
-let worker: Worker | null = null
-let workerThreadId = 0
+let helper: ChildProcessWithoutNullStreams | null = null
+let helperStartedAt = 0
+let restartAttempt = 0
+let restartTimer: ReturnType<typeof setTimeout> | null = null
 const lastPress = new Map<number, number>()
 
-let postThreadMessageFn: ((threadId: number, msg: number, wParam: number, lParam: number) => number) | null = null
-
-function postQuit(threadId: number): boolean {
-  try {
-    if (!postThreadMessageFn) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const koffi = require('koffi')
-      const user32 = koffi.load('user32.dll')
-      postThreadMessageFn = user32.func(
-        'int __stdcall PostThreadMessageW(uint32_t idThread, uint32_t Msg, uintptr_t wParam, intptr_t lParam)'
-      )
-    }
-    return postThreadMessageFn!(threadId, WM_QUIT, 0, 0) !== 0
-  } catch (err) {
-    log('MOUSE', `PostThreadMessageW failed: ${err}`)
-    return false
-  }
+function powershellPath(): string {
+  const root = process.env['SystemRoot'] || 'C:\\Windows'
+  return join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 }
 
 function handlePress(button: number): void {
@@ -56,70 +89,95 @@ function handlePress(button: number): void {
   }
 }
 
-function startWorker(): void {
-  const w = createMouseHookWorker({})
-  worker = w
-  workerThreadId = 0
+function scheduleRestart(): void {
+  if (!enabled || restartTimer) return
+  if (Date.now() - helperStartedAt > STABLE_AFTER_MS) restartAttempt = 0
+  const delay = RESTART_DELAYS_MS[Math.min(restartAttempt, RESTART_DELAYS_MS.length - 1)]
+  restartAttempt++
+  log('MOUSE', `Restarting side-button helper in ${delay / 1000}s`)
+  restartTimer = setTimeout(() => {
+    restartTimer = null
+    if (enabled && !helper) startHelper()
+  }, delay)
+}
 
-  w.on('message', (message: WorkerMessage) => {
-    if (worker !== w) {
-      // Stopped before its hook was up: shut it down now that its thread is known.
-      if (message.type === 'ready') postQuit(message.threadId)
-      return
-    }
-    if (message.type === 'ready') {
-      workerThreadId = message.threadId
-      log('MOUSE', 'Side-button hook installed (rear = record, front = history)')
-    } else if (message.type === 'press') {
-      handlePress(message.button)
-    } else if (message.type === 'error') {
-      log('MOUSE', `Side-button hook FAILED: ${message.message}`)
+function startHelper(): void {
+  const encoded = Buffer.from(HOOK_SCRIPT, 'utf16le').toString('base64')
+  let child: ChildProcessWithoutNullStreams
+  try {
+    child = spawn(
+      powershellPath(),
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      { windowsHide: true }
+    )
+  } catch (err) {
+    log('MOUSE', 'Could not start side-button helper', err)
+    scheduleRestart()
+    return
+  }
+  helper = child
+  helperStartedAt = Date.now()
+
+  createInterface({ input: child.stdout }).on('line', (line) => {
+    if (helper !== child) return
+    const text = line.trim()
+    if (text === 'ready') {
+      log('MOUSE', `Side-button hook installed (helper pid ${child.pid}; rear = record, front = history)`)
+    } else if (text.startsWith('press ')) {
+      handlePress(Number(text.slice(6)))
+    } else if (text.startsWith('error ')) {
+      log('MOUSE', `Side-button hook FAILED: SetWindowsHookEx error ${text.slice(6)}`)
     }
   })
-  w.on('error', (err) => log('MOUSE', 'Side-button worker crashed', err))
-  w.on('exit', (code) => {
-    log('MOUSE', `Side-button worker exited (code ${code})`)
-    if (worker === w) {
-      worker = null
-      workerThreadId = 0
-    }
+  createInterface({ input: child.stderr }).on('line', (line) => {
+    // PowerShell wraps stderr in CLIXML; keep only the error records.
+    const text = line.trim()
+    if (!text || text === '#< CLIXML') return
+    if (text.startsWith('<') && !text.includes('S="Error"')) return
+    log('MOUSE', `helper stderr: ${text}`)
   })
+  child.on('error', (err) => log('MOUSE', 'Side-button helper error', err))
+  child.on('exit', (code, signal) => {
+    if (helper !== child) return
+    helper = null
+    log('MOUSE', `Side-button helper exited (code ${code}, signal ${signal})`)
+    scheduleRestart()
+  })
+}
+
+function stopHelper(): void {
+  if (restartTimer) {
+    clearTimeout(restartTimer)
+    restartTimer = null
+  }
+  const child = helper
+  if (!child) return
+  helper = null
+  log('MOUSE', 'Removing side-button hook')
+  // Closing stdin makes the helper exit by itself; kill() is the fallback.
+  child.stdin.end()
+  setTimeout(() => {
+    if (child.exitCode === null) child.kill()
+  }, 1000).unref()
 }
 
 export function startMouseButtons(h: Handlers): void {
   handlers = h
   enabled = true
-  if (worker) return
-  try {
-    startWorker()
-  } catch (err) {
-    log('MOUSE', 'Could not start side-button worker', err)
-  }
+  restartAttempt = 0
+  if (!helper) startHelper()
 }
 
 export function stopMouseButtons(): void {
   enabled = false
-  stopWorker()
-}
-
-function stopWorker(): void {
-  const w = worker
-  if (!w) return
-  worker = null
-  log('MOUSE', 'Removing side-button hook')
-  // The worker sits in GetMessageW, where terminate() can't reach it; WM_QUIT is
-  // the clean way out (it unhooks). Before 'ready' it is still in JS, and the
-  // message handler above posts WM_QUIT once the thread id arrives.
-  if (workerThreadId) postQuit(workerThreadId)
-  setTimeout(() => void w.terminate(), STOP_TIMEOUT_MS).unref()
-  workerThreadId = 0
+  stopHelper()
 }
 
 // Windows silently drops a low-level hook that ever times out, and gives no
-// signal; reinstalling after sleep/unlock keeps the buttons alive.
+// signal; a fresh helper after sleep/unlock keeps the buttons alive.
 export function restartMouseButtons(): void {
   if (!enabled || !handlers) return
   log('MOUSE', 'Reinstalling side-button hook')
-  stopWorker()
-  startMouseButtons(handlers)
+  stopHelper()
+  startHelper()
 }
