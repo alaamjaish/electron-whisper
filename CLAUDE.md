@@ -74,12 +74,15 @@ JSON files in `app.getPath('userData')`:
 - The `WH_MOUSE_LL` hook runs **out of process**: a hidden Windows PowerShell helper (`-EncodedCommand`, a few lines of C# via `Add-Type`) spawned by main. It prints `ready`, `press 1` / `press 2`, or `error <code>` on stdout, and exits when its stdin closes, so it can't outlive the app.
 - **Don't move the hook back into Electron.** v1.1.0 ran it in a Node worker thread through `koffi` callbacks; the whole app died with a native crash (`0x80000003`, main process) about 20 minutes after start. Out of process, a helper crash only costs a helper restart (backoff 1 s → 3 s → 10 s → 30 s, reset after 60 s of uptime).
 - XBUTTON1/2 down **and** up are swallowed (`return 1`), so apps never see Back/Forward. A 300 ms per-button debounce guards against double toggles.
-- Windows silently drops a low-level hook that ever times out, with no signal, so resume/unlock start a fresh helper (`restartMouseButtons()`).
+- Windows silently drops a low-level hook that ever times out, with no signal. Two guards:
+  - the helper re-installs its hook every 2 minutes (`HOOK_REFRESH_MS`), adding the new hook before removing the old one, so there is no gap and no double press;
+  - resume/unlock start a fresh helper (`restartMouseButtons()`).
 - Logs under the `MOUSE` tag; `Side-button hook installed (helper pid …)` means it is live. PowerShell's CLIXML stderr noise is filtered; only error records are logged.
 
 ### Autostart
 
 - `app.setLoginItemSettings({ openAtLogin: true, args: ['--autostart'] })` runs on every startup. A second instance launched with `--autostart` quits quietly (two autostarts can race at sign-in, e.g. the Run entry and a scheduled task); any other second launch opens Settings.
+- **Never leave the installed app running from an agent shell.** A process started there joins the agent app's process tree. On 2026-10-20 the Claude desktop app updated and restarted at 18:03 and took LocalTranscriber down with it, with no crash and no log line. Start it outside the agent: `Start-ScheduledTask -TaskName 'LocalTranscriber - Start at sign-in'` (on Alaa's PC) or `explorer.exe "<path to LocalTranscriber.exe>"`.
 
 
 لما تسوي commit اكتب تفاصيل كفاية في الوصف حتى نستطيع نرجع لههم بسهولة بالمستتقبل

@@ -12,6 +12,8 @@ const DEBOUNCE_MS = 300
 // Restart backoff for a helper that dies; reset once it has run this long.
 const RESTART_DELAYS_MS = [1000, 3000, 10000, 30000]
 const STABLE_AFTER_MS = 60000
+// How often the helper re-installs its hook (see the C# below).
+const HOOK_REFRESH_MS = 120000
 
 // The low-level mouse hook runs in its own helper process (Windows PowerShell +
 // a few lines of C#), never inside Electron. Windows calls a WH_MOUSE_LL hook for
@@ -32,15 +34,30 @@ public static class LtSideButtons {
   delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int idHook, HookProc fn, IntPtr hMod, uint threadId);
   [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hhk);
   [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
   static HookProc proc;
+  static IntPtr hook;
   static void Say(string line) { try { Console.Out.WriteLine(line); Console.Out.Flush(); } catch { Environment.Exit(0); } }
   public static void Run() {
     proc = Callback;
-    if (SetWindowsHookEx(14, proc, GetModuleHandle(null), 0) == IntPtr.Zero) { Say("error " + Marshal.GetLastWin32Error()); return; }
+    hook = SetWindowsHookEx(14, proc, GetModuleHandle(null), 0);
+    if (hook == IntPtr.Zero) { Say("error " + Marshal.GetLastWin32Error()); return; }
     var watch = new Thread(() => { try { while (Console.In.Read() != -1) { } } catch { } Environment.Exit(0); });
     watch.IsBackground = true;
     watch.Start();
+    // Windows silently drops a hook that ever answers too slowly, with no signal.
+    // Re-hook on a timer: the new hook goes in before the old one comes out, so
+    // there is no gap, and the newest hook swallows the press before the old sees it.
+    var refresh = new System.Windows.Forms.Timer();
+    refresh.Interval = REFRESH_MS;
+    refresh.Tick += (s, e) => {
+      IntPtr fresh = SetWindowsHookEx(14, proc, GetModuleHandle(null), 0);
+      if (fresh == IntPtr.Zero) { Say("error " + Marshal.GetLastWin32Error()); return; }
+      UnhookWindowsHookEx(hook);
+      hook = fresh;
+    };
+    refresh.Start();
     Say("ready");
     Application.Run();
   }
@@ -102,7 +119,8 @@ function scheduleRestart(): void {
 }
 
 function startHelper(): void {
-  const encoded = Buffer.from(HOOK_SCRIPT, 'utf16le').toString('base64')
+  const script = HOOK_SCRIPT.replace('REFRESH_MS', String(HOOK_REFRESH_MS))
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
   let child: ChildProcessWithoutNullStreams
   try {
     child = spawn(
